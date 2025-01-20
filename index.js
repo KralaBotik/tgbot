@@ -57,7 +57,7 @@ bot.hears("👤 Личный кабинет", async (ctx) => {
   }
 
   await ctx.reply(
-    `<b>👤 Личный кабинет</b>\n\n<b>🆔 ID:</b> ${userInfo.userId}\n<b>📱 Телефон:</b> ${userInfo.phone}`,
+    `<b>👤 Личный кабинет</b>\n\n<b>🆔 ID:</b> ${userInfo.Id}\n<b>📱 Телефон:</b> ${userInfo.phone}`,
     { parse_mode: "HTML" }
   );
 });
