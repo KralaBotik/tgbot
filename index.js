@@ -1,14 +1,11 @@
 require("dotenv").config();
-const { Bot, Keyboard, InlineKeyboard } = require("grammy");
+const { Bot, Keyboard } = require("grammy");
 const { addUser, isAuthorized, getUserInfo } = require("./database");
 
 const bot = new Bot(process.env.BOT_API_KEY);
 
 const mainMenu = new Keyboard()
   .text("📅 Записаться на мойку")
-  .text("📋 Мои записи")
-  .row()
-  .text("📜 Архив моек")
   .text("👤 Личный кабинет")
   .resized();
 
@@ -16,6 +13,13 @@ const autorKeyboard = new Keyboard()
   .requestContact("📱 Авторизироваться")
   .resized()
   .oneTime();
+
+const cabinetMenu = new Keyboard()
+  .text("📜 Архив моек")
+  .text("📋 Мои текущие записи")
+  .row()
+  .text("🔙 Вернуться в меню")
+  .resized();
 
 bot.command("start", async (ctx) => {
   const userId = ctx.from.id;
@@ -48,8 +52,8 @@ bot.on(":contact", async (ctx) => {
 
 bot.hears("👤 Личный кабинет", async (ctx) => {
   const userId = ctx.from.id;
-  const userInfo = await getUserInfo(userId);
 
+  const userInfo = await getUserInfo(userId);
   if (!userInfo) {
     return ctx.reply("🚫 Ты не авторизован! Пожалуйста, отправь свой контакт.", {
       reply_markup: autorKeyboard,
@@ -57,9 +61,19 @@ bot.hears("👤 Личный кабинет", async (ctx) => {
   }
 
   await ctx.reply(
-    `<b>👤 Личный кабинет</b>\n\n<b>🆔 ID:</b> ${userInfo.Id}\n<b>📱 Телефон:</b> ${userInfo.phone}`,
-    { parse_mode: "HTML" }
+    `<b>👤 Личный кабинет</b>\n\n` +
+    `<b>🆔 ID:</b> ${userInfo.Id}\n` +
+    `<b>🔑 UserID:</b> ${userInfo.user_id}\n` +
+    `<b>📱 Телефон:</b> ${userInfo.phone}`,
+    {
+      parse_mode: "HTML",
+      reply_markup: cabinetMenu,
+    }
   );
+});
+
+bot.hears("🔙 Вернуться в меню", async (ctx) => {
+  await ctx.reply("Вы вернулись в главное меню.", { reply_markup: mainMenu });
 });
 
 bot.on("message", async (ctx) => {
