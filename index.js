@@ -3,7 +3,6 @@ const { Bot, Keyboard, InlineKeyboard, session } = require("grammy");
 const axios = require("axios");
 const { addUser, isAuthorized, getUserInfo, saveAppointment, deleteAppointmentsForToday } = require("./database");
 
-
 const bot = new Bot(process.env.BOT_API_KEY);
 
 bot.use(session({
@@ -15,6 +14,8 @@ bot.use(session({
 const mainMenu = new Keyboard()
   .text("📅 Записаться на мойку")
   .text("👤 Личный кабинет")
+  .row()
+  .text("📋 Меню команд")
   .resized();
 
 const authKeyboard = new Keyboard()
@@ -22,41 +23,84 @@ const authKeyboard = new Keyboard()
   .resized()
   .oneTime();
 
-  const cabinetMenu = new Keyboard()
+const cabinetMenu = new Keyboard()
   .text("📜 Архив моек")
   .text("📋 Мои текущие записи")
-  .row()
-  .text("🗑 Удалить все записи на сегодня")
   .row()
   .text("🔙 Вернуться в меню")
   .resized();
 
-
 const API_URL = "https://molot.papillon.ru/rty/wht/reserv/";
+
+async function getAppointmentsForArchive(userId) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+
+  try {
+    const formattedYesterday = yesterday.toISOString().split('T')[0];
+    const formattedThirtyDaysAgo = thirtyDaysAgo.toISOString().split('T')[0];
+
+    const response = await axios.get(`${API_URL}get.php`, {
+      params: {
+        user_id: userId,
+        dates: `[${formattedThirtyDaysAgo},${formattedYesterday}]`
+      }
+    });
+
+    if (Array.isArray(response.data)) {
+      const appointments = response.data.flatMap(box => box.intervals);
+      return appointments;
+    } else {
+      console.error("Неправильный формат данных от API:", response.data);
+      return [];
+    }
+  } catch (error) {
+    console.error("Ошибка при получении записей для архива:", error);
+    return [];
+  }
+}
+
+bot.hears("📜 Архив моек", async (ctx) => {
+  const userId = ctx.from.id;
+  const appointments = await getAppointmentsForArchive(userId);
+
+  if (appointments.length === 0) {
+    return ctx.reply("❌ Записи за последние 30 дней отсутствуют.", { reply_markup: cabinetMenu });
+  }
+
+  let message = "📜 Архив моек за последние 30 дней:\n\n";
+  appointments.forEach(({ id, date, time }) => {
+    const formattedDate = formatDate(date);
+    message += `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут\n\n`;
+  });
+
+  await ctx.reply(message, { reply_markup: cabinetMenu });
+});
 
 function formatDate(dateString) {
   const [year, month, day] = dateString.split('-');
   return `${day}.${month}.${year}`;
 }
 
-// Функция для удаления бронирования
-async function cancelReservation(date, time, duration, userId, boxId = 1) {
+async function cancelReservation(date, time, duration, reservId, userId, boxId = 1) {
   const url = `${API_URL}set.php?box=${boxId}`;
-
+  console.log('!!!!!!!!начато удал', );
   const data = {
-    id: null,
-    date: date, // Формат YYYY-MM-DD
+    id: reservId,
+    date: date,
     time: {
-      start: time, // Формат HH:MM
+      start: time,
       duration: duration
     },
     free: true,
     service: false,
     person: {
-      id: userId // ID пользователя
+      id: userId
     }
   };
-
   try {
     const response = await axios.post(url, data, {
       headers: { 'Content-Type': 'application/json' }
@@ -71,16 +115,15 @@ async function cancelReservation(date, time, duration, userId, boxId = 1) {
 
 async function getAppointmentsFromAPI(userId) {
   try {
-    const today = new Date().toISOString().split('T')[0]; // Формат YYYY-MM-DD
+    const today = new Date().toISOString().split('T')[0];
     const response = await axios.get(`${API_URL}get.php`, {
       params: {
         user_id: userId,
-        dates: `[${today}]` // Передаем текущую дату
+        dates: `[${today}]`
       }
     });
-    console.log("Ответ от API:", JSON.stringify(response.data, null, 2)); // Логируем ответ
+    console.log("Ответ от API:", JSON.stringify(response.data, null, 2));
 
-    // Извлекаем интервалы из ответа
     if (Array.isArray(response.data)) {
       const appointments = response.data.flatMap(box => box.intervals);
       return appointments;
@@ -94,7 +137,7 @@ async function getAppointmentsFromAPI(userId) {
   }
 }
 
-bot.hears("📜 Архив моек", async (ctx) => {
+bot.hears("📋 Мои текущие записи", async (ctx) => {
   const today = new Date().toISOString().split('T')[0];
   const appointments = await getAppointmentsFromAPI(ctx.from.id);
 
@@ -102,50 +145,60 @@ bot.hears("📜 Архив моек", async (ctx) => {
     return ctx.reply("❌ Записи на сегодня отсутствуют.", { reply_markup: cabinetMenu });
   }
 
-  for (const { id, date, time } of appointments) {
+  let message = "📋 Ваши текущие записи:\n\n";
+  appointments.forEach(({ id, date, time }) => {
     const formattedDate = formatDate(date);
-    const keyboard = new InlineKeyboard().text("🗑 Удалить", `delete_${id}`);
-    await ctx.reply(
-      `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут`,
-      { reply_markup: keyboard }
-    );
+    message += `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут\n\n`;
+  });
+
+  const keyboard = new InlineKeyboard().text("🗑 Удалить запись", "delete_appointment");
+
+  await ctx.reply(message, { reply_markup: keyboard });
+});
+bot.callbackQuery("delete_appointment", async (ctx) => {
+  const userId = ctx.from.id;
+  const appointments = await getAppointmentsFromAPI(userId);
+
+  if (appointments.length === 0) {
+    return ctx.answerCallbackQuery("❌ Записи для удаления отсутствуют.");
   }
+
+  const keyboard = new InlineKeyboard();
+  appointments.forEach(({ id, date, time }) => {
+    const formattedTime = time.start;
+    keyboard.text(`❌ ${formattedTime}`, `delete_${id}`).row();
+  });
+
+  await ctx.editMessageText("Выберите запись для удаления:", { reply_markup: keyboard });
 });
 
-bot.callbackQuery(/delete_(\d+)/, async (ctx) => {
+bot.callbackQuery(/^delete_(\d+)/, async (ctx) => {
   const appointmentId = ctx.match[1];
   const userId = ctx.from.id;
 
   try {
     const appointments = await getAppointmentsFromAPI(userId);
-
-    if (!Array.isArray(appointments)) {
-      console.error("Ожидался массив записей, получено:", appointments);
-      await ctx.answerCallbackQuery("❌ Ошибка при получении записей.");
-      return;
-    }
-
     const appointment = appointments.find(app => app.id === appointmentId);
 
     if (!appointment) {
-      await ctx.answerCallbackQuery("❌ Запись не найдена.");
-      return;
+      return ctx.answerCallbackQuery("❌ Запись не найдена.");
     }
 
     const formattedDate = formatDate(appointment.date);
 
-    await cancelReservation(appointment.date, appointment.time.start, appointment.time.duration, userId);
-
-    await ctx.answerCallbackQuery("✅ Запись удалена.");
-    await ctx.editMessageText(
-      `🚗 Запись удалена:\n\n` +
+    const confirmationMessage = `Вы уверены, что хотите удалить запись?\n\n` +
       `📅 Дата: ${formattedDate}\n` +
       `⏰ Время: ${appointment.time.start}\n` +
-      `⏱ Длительность: ${appointment.time.duration} минут`
-    );
+      `⏱ Длительность: ${appointment.time.duration} минут`;
+
+    const confirmationKeyboard = new InlineKeyboard()
+      .text("✅ Подтвердить", `confirm_delete_${appointmentId}`)
+      .text("❌ Отменить", "cancel_delete");
+
+    await ctx.editMessageText(confirmationMessage, { reply_markup: confirmationKeyboard });
   } catch (error) {
     console.error("Ошибка удаления:", error);
-    await ctx.answerCallbackQuery("❌ Ошибка при удалении записи.");
+    await ctx.answerCallbackQuery("❌ !!!!!!!Ошибка при удалении записи.");
   }
 });
 
@@ -154,13 +207,48 @@ async function fetchSchedule(date, box = 1) {
     const response = await axios.get(API_URL + 'get.php', { params: { dates: `[${date}]`, box } });
     return response.data[0]?.intervals || [];
   } catch (error) {
-    console.error("Ошибка при запросе расписания:", error);
+    console.error("Ошибка при получении расписания:", error);
     return [];
   }
 }
 
+bot.callbackQuery(/^confirm_delete_(\d+)/, async (ctx) => {
+  console.log(ctx);
+  const appointmentId = ctx.match[1];
+  const userId = ctx.from.id;
+  console.log('delete confirmed' ,appointmentId)
+  try {
+    // Получаем информацию о записи
+    const appointments = await getAppointmentsFromAPI(userId);
+    const appointment = appointments.find(app => app.id === appointmentId);
+console.log('dsadasdasdasoooooooooooo' ,appointments)
+    if (!appointment) {
+      return ctx.answerCallbackQuery("❌ Запись не найдена.");
+    }
+
+    // Удаляем запись через API
+    await cancelReservation(
+      appointment.date,          // Дата записи
+      appointment.time.start,    // Время начала
+      appointment.time.duration, // Длительность
+      appointment.id,            // ID записи
+      appointment.person.id      // ID пользователя
+    );
+
+    // Обновляем сообщение с уведомлением об успешном удалении
+    await ctx.editMessageText(
+      `✅ Запись успешно удалена:\n\n` +
+      `📅 Дата: ${formatDate(appointment.date)}\n` +
+      `⏰ Время: ${appointment.time.start}\n` +
+      `⏱ Длительность: ${appointment.time.duration} минут`
+    );
+  } catch (error) {
+    console.error("Ошибка удаления:", error);
+    await ctx.answerCallbackQuery("❌ Ошибка при удалении записи.");
+}
+});
+
 async function setReservation(data, box = 1) {
-  console.log('запущено!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!', data)
   try {
     const response = await axios({
       method: 'post',
@@ -226,10 +314,6 @@ async function createDateButtons() {
   keyboard.text("Сегодня", `date_${today.toISOString().split('T')[0]}`);
   keyboard.text("Завтра", `date_${new Date(today.setDate(today.getDate() + 1)).toISOString().split('T')[0]}`);
   keyboard.row();
-
-  keyboard.text("01.04.2024", "date_2024-04-01");
-  keyboard.row();
-
   keyboard.text("📅 Календарь", "open_calendar");
   keyboard.row();
 
@@ -245,7 +329,8 @@ async function createCalendarButtons() {
   for (let i = 0; i < 30; i++) {
     const date = new Date(today);
     date.setDate(today.getDate() + i);
-    keyboard.text(date.toLocaleDateString('ru-RU'), `date_${date.toISOString().split('T')[0]}`);
+    const dayMonth = date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    keyboard.text(dayMonth, `date_${date.toISOString().split('T')[0]}`);
     if ((i + 1) % 5 === 0) keyboard.row();
   }
 
@@ -254,15 +339,49 @@ async function createCalendarButtons() {
   return keyboard;
 }
 
-async function createDurationButtons() {
-  return new InlineKeyboard()
-    .text("15 мин", "duration_15")
-    .text("30 мин", "duration_30")
-    .text("45 мин", "duration_45")
-    .text("60 мин", "duration_60")
-    .row()
-    .text("🔙 Назад", "back_to_time");
+async function getAvailableDurations(date, time, box = 1) {
+  const intervals = await fetchSchedule(date, box);
+  const [selectedHour, selectedMinute] = time.split(":").map(Number);
+  const selectedTimeInMinutes = selectedHour * 60 + selectedMinute;
+
+  const availableDurations = [15, 30, 45, 60];
+
+  const validDurations = availableDurations.filter(duration => {
+    const endTimeInMinutes = selectedTimeInMinutes + duration;
+
+    const isAvailable = intervals.every(interval => {
+      const [startHour, startMinute] = interval.time.start.split(":").map(Number);
+      const startTimeInMinutes = startHour * 60 + startMinute;
+      const intervalDuration = parseInt(interval.time.duration);
+      const endTimeInMinutesInterval = startTimeInMinutes + intervalDuration;
+
+      return !(
+        (selectedTimeInMinutes < endTimeInMinutesInterval) &&
+        (endTimeInMinutes > startTimeInMinutes)
+      );
+    });
+    return isAvailable;
+  });
+  return validDurations;
 }
+
+async function createDurationButtons(date, time) {
+  const availableDurations = await getAvailableDurations(date, time);
+  const keyboard = new InlineKeyboard();
+
+  if (availableDurations.length === 0) {
+    console.log("Нет доступных длительностей для данного времени");
+  }
+
+  availableDurations.forEach(duration => {
+    keyboard.text(`${duration} мин`, `duration_${duration}`);
+  });
+
+  keyboard.row().text("🔙 Назад", "back_to_time");
+
+  return keyboard;
+}
+
 
 async function createConfirmationButtons() {
   return new InlineKeyboard()
@@ -282,14 +401,8 @@ bot.command("start", async (ctx) => {
 });
 
 bot.hears("📅 Записаться на мойку", async (ctx) => {
-  await ctx.reply("Выберите дату:", {
-    reply_markup: {
-      remove_keyboard: true
-    }
-  });
-
   const keyboard = await createDateButtons();
-  await ctx.reply("Выберите дату для записи на мойку:", { reply_markup: keyboard });
+  await ctx.reply("Выберите дату из календаря:", { reply_markup: keyboard });
 });
 
 bot.hears("👤 Личный кабинет", async (ctx) => {
@@ -304,19 +417,6 @@ bot.hears("👤 Личный кабинет", async (ctx) => {
     { reply_markup: cabinetMenu }
   );
 });
-
-bot.hears("🗑 Удалить все записи на сегодня", async (ctx) => {
-  try {
-    console.log("Удаление всех записей с ID 4937...");
-    await deleteAllAppointmentsForToday(4937);
-    await deleteAppointmentsForToday(4937);
-    await ctx.reply("✅ Все записи с ID 4937 на сегодня успешно удалены!", { reply_markup: cabinetMenu });
-  } catch (error) {
-    console.error("Ошибка при удалении записей:", error);
-    await ctx.reply(`❌ Произошла ошибка при удалении записей: ${error.message}`, { reply_markup: cabinetMenu });
-  }
-});
-
 
 bot.hears("🔙 Вернуться в меню", async (ctx) => {
   await ctx.reply("Вы вернулись в главное меню.", { reply_markup: mainMenu });
@@ -337,7 +437,7 @@ bot.callbackQuery("open_calendar", async (ctx) => {
 bot.callbackQuery(/time_(.+)_(.+)/, async (ctx) => {
   const [_, date, time] = ctx.match;
   ctx.session.appointment.time = time;
-  const keyboard = await createDurationButtons();
+  const keyboard = await createDurationButtons(date, time);
   await ctx.editMessageText(`Вы выбрали время: ${time}. Выберите длительность:`, { reply_markup: keyboard });
 });
 
@@ -345,7 +445,6 @@ bot.callbackQuery(/duration_(\d+)/, async (ctx) => {
   const duration = ctx.match[1];
   ctx.session.appointment.duration = duration;
   const { date, time } = ctx.session.appointment;
-
   const confirmationKeyboard = await createConfirmationButtons();
   await ctx.editMessageText(
     `Подтвердите запись:\n\n` +
@@ -403,13 +502,24 @@ bot.callbackQuery("back_to_dates", async (ctx) => {
 
 bot.callbackQuery("back_to_time", async (ctx) => {
   const { date } = ctx.session.appointment;
+  if (!date) {
+    await ctx.editMessageText("❌ Ошибка: дата не найдена. Выберите дату снова.");
+    const keyboard = await createDateButtons();
+    return await ctx.reply("Выберите дату для записи на мойку:", { reply_markup: keyboard });
+  }
   const keyboard = await createTimeButtons(date, 1);
   await ctx.editMessageText(`Выберите время для ${date}:`, { reply_markup: keyboard });
 });
 
 bot.callbackQuery("back_to_duration", async (ctx) => {
   const { date, time } = ctx.session.appointment;
-  const keyboard = await createDurationButtons();
+  if (!date || !time) {
+    await ctx.editMessageText("❌ Ошибка: данные не найдены. Начните с выбора даты.");
+    const keyboard = await createDateButtons();
+    return await ctx.reply("Выберите дату для записи на мойку:", { reply_markup: keyboard });
+  }
+
+  const keyboard = await createDurationButtons(date, time);
   await ctx.editMessageText(`Вы выбрали время: ${time}. Выберите длительность:`, { reply_markup: keyboard });
 });
 
