@@ -1,9 +1,7 @@
 const sqlite3 = require("sqlite3").verbose();
 
-// Инициализация базы данных
 const db = new sqlite3.Database("bot.db");
 
-// Создание таблиц
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -38,7 +36,6 @@ async function addUser(userId, phone) {
   });
 }
 
-// Проверка авторизации
 async function isAuthorized(userId) {
   return new Promise((resolve, reject) => {
     db.get(
@@ -52,7 +49,6 @@ async function isAuthorized(userId) {
   });
 }
 
-// Получение информации о пользователе
 async function getUserInfo(userId) {
   return new Promise((resolve, reject) => {
     db.get(
@@ -79,7 +75,6 @@ async function saveAppointment(userId, date, time, duration) {
   });
 }
 
-// Удаление записей пользователя на сегодняшний день
 async function deleteAppointmentsForToday(userId) {
   const today = new Date().toISOString().split('T')[0];
   return new Promise((resolve, reject) => {
@@ -99,7 +94,6 @@ async function deleteAppointmentsForToday(userId) {
   });
 }
 
-// Закрытие базы данных
 function closeDatabase() {
   return new Promise((resolve, reject) => {
     db.close((err) => {
@@ -115,7 +109,7 @@ module.exports = {
   getUserInfo,
   saveAppointment,
   deleteAppointmentsForToday,
-  getAppointmentById, // Добавляем сюда
+  getAppointmentById,
   closeDatabase,
 };
 

@@ -15,7 +15,6 @@ const mainMenu = new Keyboard()
   .text("📅 Записаться на мойку")
   .text("👤 Личный кабинет")
   .row()
-  .text("📋 Меню команд")
   .resized();
 
 const authKeyboard = new Keyboard()
@@ -218,7 +217,6 @@ bot.callbackQuery(/^confirm_delete_(\d+)/, async (ctx) => {
   const userId = ctx.from.id;
   console.log('delete confirmed' ,appointmentId)
   try {
-    // Получаем информацию о записи
     const appointments = await getAppointmentsFromAPI(userId);
     const appointment = appointments.find(app => app.id === appointmentId);
 console.log('dsadasdasdasoooooooooooo' ,appointments)
@@ -226,16 +224,14 @@ console.log('dsadasdasdasoooooooooooo' ,appointments)
       return ctx.answerCallbackQuery("❌ Запись не найдена.");
     }
 
-    // Удаляем запись через API
     await cancelReservation(
-      appointment.date,          // Дата записи
-      appointment.time.start,    // Время начала
-      appointment.time.duration, // Длительность
-      appointment.id,            // ID записи
-      appointment.person.id      // ID пользователя
+      appointment.date,
+      appointment.time.start,
+      appointment.time.duration,
+      appointment.id,
+      appointment.person.id
     );
 
-    // Обновляем сообщение с уведомлением об успешном удалении
     await ctx.editMessageText(
       `✅ Запись успешно удалена:\n\n` +
       `📅 Дата: ${formatDate(appointment.date)}\n` +
