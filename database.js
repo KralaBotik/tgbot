@@ -1,7 +1,9 @@
 const sqlite3 = require("sqlite3").verbose();
+
+// Инициализация базы данных
 const db = new sqlite3.Database("bot.db");
 
-// Создание таблицы
+// Создание таблиц
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
@@ -10,47 +12,129 @@ db.serialize(() => {
       phone TEXT
     )
   `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS appointments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      date TEXT,
+      time TEXT,
+      duration INTEGER,
+      FOREIGN KEY(user_id) REFERENCES users(user_id)
+    )
+  `);
 });
 
-// Функция для добавления пользователя
 async function addUser(userId, phone) {
   return new Promise((resolve, reject) => {
-    db.run("INSERT INTO users (user_id, phone) VALUES (?, ?)", [userId, phone], (err) => {
-      if (err) return reject(err);
-      resolve();
-    });
+    db.run(
+      "INSERT INTO users (user_id, phone) VALUES (?, ?)",
+      [userId, phone],
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      }
+    );
   });
 }
 
 // Проверка авторизации
 async function isAuthorized(userId) {
   return new Promise((resolve, reject) => {
-    db.get("SELECT * FROM users WHERE user_id = ?", [userId], (err, row) => {
-      if (err) return reject(err);
-      resolve(!!row);
-    });
+    db.get(
+      "SELECT * FROM users WHERE user_id = ?",
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(!!row);
+      }
+    );
   });
 }
 
 // Получение информации о пользователе
 async function getUserInfo(userId) {
   return new Promise((resolve, reject) => {
-    db.get("SELECT * FROM users WHERE user_id = ?", [userId], (err, row) => {
-      if (err) return reject(err);
-      resolve(row);
+    db.get(
+      "SELECT * FROM users WHERE user_id = ?",
+      [userId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      }
+    );
+  });
+}
+
+async function saveAppointment(userId, date, time, duration) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      "INSERT INTO appointments (user_id, date, time, duration) VALUES (?, ?, ?, ?)",
+      [userId, date, time, duration],
+      (err) => {
+        if (err) reject(err);
+        else resolve();
+      }
+    );
+  });
+}
+
+// Удаление записей пользователя на сегодняшний день
+async function deleteAppointmentsForToday(userId) {
+  const today = new Date().toISOString().split('T')[0];
+  return new Promise((resolve, reject) => {
+    db.run(
+      "DELETE FROM appointments WHERE user_id = ? AND date = ?",
+      [userId, today],
+      (err) => {
+        if (err) {
+          console.error("Ошибка при удалении записей из базы данных:", err);
+          reject(err);
+        } else {
+          console.log(`Записи пользователя ${userId} на ${today} удалены`);
+          resolve();
+        }
+      }
+    );
+  });
+}
+
+// Закрытие базы данных
+function closeDatabase() {
+  return new Promise((resolve, reject) => {
+    db.close((err) => {
+      if (err) reject(err);
+      else resolve();
     });
   });
 }
 
-// Закрытие базы данных при завершении
-function closeDatabase() {
-  db.close((err) => {
-    if (err) {
-      console.error("Ошибка при закрытии базы данных:", err);
-    } else {
-      console.log("База данных закрыта.");
-    }
+module.exports = {
+  addUser,
+  isAuthorized,
+  getUserInfo,
+  saveAppointment,
+  deleteAppointmentsForToday,
+  getAppointmentById, // Добавляем сюда
+  closeDatabase,
+};
+
+
+
+
+async function getAppointmentById(appointmentId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      "SELECT * FROM appointments WHERE id = ?",
+      [appointmentId],
+      (err, row) => {
+        if (err) {
+          console.error("Ошибка получения записи:", err);
+          reject(err);
+        } else {
+          resolve(row);
+        }
+      }
+    );
   });
 }
-
-module.exports = { addUser, isAuthorized, getUserInfo, closeDatabase };
