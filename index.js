@@ -19,13 +19,14 @@ const mainMenu = new Keyboard()
   .text("⚖️ Правила")
   .resized();
 
+
 const authKeyboard = new Keyboard()
   .requestContact("📱 Авторизироваться")
   .resized()
   .oneTime();
 
 const cabinetMenu = new Keyboard()
-  .text("📜 Архив моек")
+ // .text("📜 Архив моек")
   .text("📋 Мои текущие записи")
   .row()
   .text("🔙 Вернуться в меню")
@@ -64,7 +65,7 @@ bot.hears("💲 Цены", async (ctx) => {
 "с 07:00 до 24:00 - 4 руб/ мин \n" +
 "За пользование агрегатами: \n" +
 "АВД(керхер) — 8 руб/ мин. \n" +
-"пена — 26 руб/ мин\ n", { reply_markup: mainMenu });
+"пена — 26 руб/ мин", { reply_markup: mainMenu });
 });
 
 async function getAppointmentsForArchive(userId) {
@@ -109,7 +110,7 @@ bot.hears("📜 Архив моек", async (ctx) => {
   let message = "📜 Архив моек за последние 30 дней:\n\n";
   appointments.forEach(({ id, date, time }) => {
     const formattedDate = formatDate(date);
-    message += `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут\n\n`;
+    message += `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут\n Цена:\n\n`;
   });
 
   await ctx.reply(message, { reply_markup: cabinetMenu });
@@ -122,7 +123,7 @@ function formatDate(dateString) {
 
 async function cancelReservation(date, time, duration, reservId, userId, boxId = 1) {
   const url = `${API_URL}set.php?box=${boxId}`;
-  console.log('!!!!!!!!начато удал', );
+  console.log('!начато удаление', );
   const data = {
     id: reservId,
     date: date,
@@ -148,16 +149,21 @@ async function cancelReservation(date, time, duration, reservId, userId, boxId =
   }
 }
 
-async function getAppointmentsFromAPI(userId) {
+async function getAppointmentsFromAPI(userId, daysAhead = 30) {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + daysAhead);
+    
+    const startDateStr = today.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+
     const response = await axios.get(`${API_URL}get.php`, {
       params: {
         user_id: userId,
-        dates: `[${today}]`
+        dates: `[${startDateStr},${endDateStr}]`
       }
     });
-    console.log("Ответ от API:", JSON.stringify(response.data, null, 2));
 
     if (Array.isArray(response.data)) {
       const appointments = response.data.flatMap(box => box.intervals);
@@ -173,26 +179,25 @@ async function getAppointmentsFromAPI(userId) {
 }
 
 bot.hears("📋 Мои текущие записи", async (ctx) => {
-  const today = new Date().toISOString().split('T')[0];
-  const appointments = await getAppointmentsFromAPI(ctx.from.id);
+  const appointments = await getAppointmentsFromAPI(ctx.from.id, 30);
 
   if (appointments.length === 0) {
-    return ctx.reply("❌ Записи на сегодня отсутствуют.", { reply_markup: cabinetMenu });
+    return ctx.reply("❌ У вас нет записей на ближайшие 30 дней.", { reply_markup: cabinetMenu });
   }
 
-  let message = "📋 Ваши текущие записи:\n\n";
+  let message = "📋 Ваши записи на ближайшие 30 дней:\n\n";
   appointments.forEach(({ id, date, time }) => {
     const formattedDate = formatDate(date);
     message += `📅 Дата: ${formattedDate}\n⏰ Время: ${time.start}\n⏱ Длительность: ${time.duration} минут\n\n`;
   });
 
   const keyboard = new InlineKeyboard().text("🗑 Удалить запись", "delete_appointment");
-
   await ctx.reply(message, { reply_markup: keyboard });
 });
+
 bot.callbackQuery("delete_appointment", async (ctx) => {
   const userId = ctx.from.id;
-  const appointments = await getAppointmentsFromAPI(userId);
+  const appointments = await getAppointmentsFromAPI(userId, 30);
 
   if (appointments.length === 0) {
     return ctx.answerCallbackQuery("❌ Записи для удаления отсутствуют.");
@@ -212,7 +217,7 @@ bot.callbackQuery(/^delete_(\d+)/, async (ctx) => {
   const userId = ctx.from.id;
 
   try {
-    const appointments = await getAppointmentsFromAPI(userId);
+    const appointments = await getAppointmentsFromAPI(userId, 30);
     const appointment = appointments.find(app => app.id === appointmentId);
 
     if (!appointment) {
@@ -253,7 +258,7 @@ bot.callbackQuery(/^confirm_delete_(\d+)/, async (ctx) => {
   const userId = ctx.from.id;
   console.log('delete confirmed' ,appointmentId)
   try {
-    const appointments = await getAppointmentsFromAPI(userId);
+    const appointments = await getAppointmentsFromAPI(userId, 30);
     const appointment = appointments.find(app => app.id === appointmentId);
 console.log('dsadasdasdasoooooooooooo' ,appointments)
     if (!appointment) {
@@ -301,12 +306,42 @@ async function setReservation(data, box = 1) {
 
 
 async function createTimeButtons(date, box) {
-  const intervals = await fetchSchedule(date, box);
-  const keyboard = new InlineKeyboard();
+  const prevDay = new Date(date);
+  prevDay.setDate(prevDay.getDate() - 1);
+  const prevDayStr = prevDay.toISOString().split('T')[0];
+
+  const [intervalsToday, intervalsPrevDay] = await Promise.all([
+    fetchSchedule(date, box),
+    fetchSchedule(prevDayStr, box)
+  ]);
 
   const busySlots = new Set();
+  const today = new Date().toISOString().split('T')[0];
+  const isToday = date === today;
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-  intervals.forEach(({ time }) => {
+  intervalsPrevDay.forEach(({ time }) => {
+    if (time?.start && time?.duration) {
+      const [startHour, startMinute] = time.start.split(":").map(Number);
+      const duration = parseInt(time.duration, 10);
+      const startTotal = startHour * 60 + startMinute;
+      const endTotal = startTotal + duration;
+
+      if (endTotal > 24 * 60) {
+        const overlapMinutes = endTotal - 24 * 60;
+        
+        for (let minutes = 0; minutes < overlapMinutes; minutes += 15) {
+          const hours = Math.floor(minutes / 60);
+          const mins = minutes % 60;
+          const slot = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+          busySlots.add(slot);
+        }
+      }
+    }
+  });
+
+  intervalsToday.forEach(({ time }) => {
     if (time?.start && time?.duration) {
       const [startHour, startMinute] = time.start.split(":").map(Number);
       const duration = parseInt(time.duration, 10);
@@ -315,6 +350,8 @@ async function createTimeButtons(date, box) {
 
       for (let minutes = startTotal; minutes < endTotal; minutes += 15) {
         const slotStart = Math.floor(minutes / 60) * 60 + (Math.floor(minutes % 60 / 15) * 15);
+        if (slotStart >= 24 * 60) break;
+        
         const hours = Math.floor(slotStart / 60);
         const mins = slotStart % 60;
         const slot = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
@@ -323,13 +360,17 @@ async function createTimeButtons(date, box) {
     }
   });
 
+  const keyboard = new InlineKeyboard();
   for (let hour = 0; hour < 24; hour++) {
     for (let minute = 0; minute < 60; minute += 15) {
-      const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-      if (busySlots.has(time)) {
-        keyboard.text(`⛔️ ${time}`, `busy_${time}`);
+      const timeSlot = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+      const slotMinutes = hour * 60 + minute;
+      const isPast = isToday && slotMinutes < currentMinutes;
+      
+      if (busySlots.has(timeSlot) || isPast) {
+        keyboard.text(`⛔️ ${timeSlot}`, `busy_${timeSlot}`);
       } else {
-        keyboard.text(`✅ ${time}`, `time_${date}_${time}`);
+        keyboard.text(`✅ ${timeSlot}`, `time_${date}_${timeSlot}`);
       }
     }
     keyboard.row();
